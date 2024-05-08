@@ -52,11 +52,11 @@ func TestClusterSharding_Add(t *testing.T) {
 
 	clusterDistribution, ok := distribution[clusterA.Server]
 	assert.True(t, ok)
-	assert.Equal(t, 1, clusterDistribution)
+	assert.Equal(t, 0, clusterDistribution)
 
 	myClusterDistribution, ok := distribution[clusterB.Server]
 	assert.True(t, ok)
-	assert.Equal(t, 0, myClusterDistribution)
+	assert.Equal(t, 1, myClusterDistribution)
 
 	assert.Equal(t, 2, len(distribution))
 }
@@ -183,7 +183,7 @@ func TestClusterSharding_Update(t *testing.T) {
 
 	distributionA, ok := distributionBefore["https://kubernetes.default.svc"]
 	assert.True(t, ok)
-	assert.Equal(t, 0, distributionA)
+	assert.Equal(t, 1, distributionA)
 
 	sharding.Update(&v1alpha1.Cluster{
 		ID:     "1",
@@ -232,7 +232,7 @@ func TestClusterSharding_UpdateServerName(t *testing.T) {
 
 	distributionA, ok := distributionBefore["https://kubernetes.default.svc"]
 	assert.True(t, ok)
-	assert.Equal(t, 0, distributionA)
+	assert.Equal(t, 1, distributionA)
 
 	sharding.Update(&v1alpha1.Cluster{
 		ID:     "1",
@@ -277,12 +277,12 @@ func TestClusterSharding_IsManagedCluster(t *testing.T) {
 		},
 	)
 
-	assert.True(t, sharding0.IsManagedCluster(&v1alpha1.Cluster{
+	assert.False(t, sharding0.IsManagedCluster(&v1alpha1.Cluster{
 		ID:     "1",
 		Server: "https://kubernetes.default.svc",
 	}))
 
-	assert.False(t, sharding0.IsManagedCluster(&v1alpha1.Cluster{
+	assert.True(t, sharding0.IsManagedCluster(&v1alpha1.Cluster{
 		ID:     "2",
 		Server: "https://127.0.0.1:6443",
 	}))
@@ -310,12 +310,12 @@ func TestClusterSharding_IsManagedCluster(t *testing.T) {
 		},
 	)
 
-	assert.False(t, sharding1.IsManagedCluster(&v1alpha1.Cluster{
+	assert.True(t, sharding1.IsManagedCluster(&v1alpha1.Cluster{
 		ID:     "1",
 		Server: "https://kubernetes.default.svc",
 	}))
 
-	assert.True(t, sharding1.IsManagedCluster(&v1alpha1.Cluster{
+	assert.False(t, sharding1.IsManagedCluster(&v1alpha1.Cluster{
 		ID:     "2",
 		Server: "https://127.0.0.1:6443",
 	}))

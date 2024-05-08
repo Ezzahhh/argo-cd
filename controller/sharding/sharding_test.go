@@ -100,6 +100,34 @@ func TestGetClusterFilterLegacy(t *testing.T) {
 	assert.Equal(t, 1, distributionFunction(&cluster4))
 }
 
+func TestGetDuplicateClusterFilterLegacy(t *testing.T) {
+	// Clusters with same URL should return same shard
+	_, db, cluster1, cluster2, cluster3, cluster4, _ := createDuplicateTestClusters()
+	replicasCount := 2
+	db.On("GetApplicationControllerReplicas").Return(replicasCount)
+	t.Setenv(common.EnvControllerShardingAlgorithm, common.LegacyShardingAlgorithm)
+	distributionFunction := LegacyDistributionFunction(replicasCount)
+	assert.Equal(t, 0, distributionFunction(nil))
+	assert.Equal(t, 1, distributionFunction(&cluster1))
+	assert.Equal(t, 1, distributionFunction(&cluster2))
+	assert.Equal(t, 1, distributionFunction(&cluster3))
+	assert.Equal(t, 1, distributionFunction(&cluster4))
+}
+
+func TestGetDuplicateClusterFilterRoundRobin(t *testing.T) {
+	// Clusters with same URL should result in the same shard
+	clusterAccessor, db, cluster1, cluster2, cluster3, cluster4, _ := createDuplicateTestClusters()
+	replicasCount := 2
+	db.On("GetApplicationControllerReplicas").Return(replicasCount)
+	t.Setenv(common.EnvControllerShardingAlgorithm, common.RoundRobinShardingAlgorithm)
+	distributionFunction := RoundRobinDistributionFunction(clusterAccessor, replicasCount)
+	assert.Equal(t, 0, distributionFunction(nil))
+	assert.Equal(t, 0, distributionFunction(&cluster1))
+	assert.Equal(t, 0, distributionFunction(&cluster2))
+	assert.Equal(t, 0, distributionFunction(&cluster3))
+	assert.Equal(t, 0, distributionFunction(&cluster4))
+}
+
 func TestGetClusterFilterUnknown(t *testing.T) {
 	clusterAccessor, db, cluster1, cluster2, cluster3, cluster4, _ := createTestClusters()
 	appAccessor, _, _, _, _, _ := createTestApps()
@@ -111,10 +139,10 @@ func TestGetClusterFilterUnknown(t *testing.T) {
 	db.On("GetApplicationControllerReplicas").Return(replicasCount)
 	distributionFunction := GetDistributionFunction(clusterAccessor, appAccessor, "unknown", replicasCount)
 	assert.Equal(t, 0, distributionFunction(nil))
-	assert.Equal(t, 0, distributionFunction(&cluster1))
-	assert.Equal(t, 1, distributionFunction(&cluster2))
-	assert.Equal(t, 0, distributionFunction(&cluster3))
-	assert.Equal(t, 1, distributionFunction(&cluster4))
+	assert.Equal(t, 1, distributionFunction(&cluster1))
+	assert.Equal(t, 0, distributionFunction(&cluster2))
+	assert.Equal(t, 1, distributionFunction(&cluster3))
+	assert.Equal(t, 0, distributionFunction(&cluster4))
 }
 
 func TestLegacyGetClusterFilterWithFixedShard(t *testing.T) {
@@ -126,8 +154,8 @@ func TestLegacyGetClusterFilterWithFixedShard(t *testing.T) {
 	db.On("GetApplicationControllerReplicas").Return(replicasCount)
 	filter := GetDistributionFunction(clusterAccessor, appAccessor, common.DefaultShardingAlgorithm, replicasCount)
 	assert.Equal(t, 0, filter(nil))
-	assert.Equal(t, 4, filter(&cluster1))
-	assert.Equal(t, 1, filter(&cluster2))
+	assert.Equal(t, 0, filter(&cluster1))
+	assert.Equal(t, 3, filter(&cluster2))
 	assert.Equal(t, 2, filter(&cluster3))
 	assert.Equal(t, 2, filter(&cluster4))
 
@@ -335,6 +363,22 @@ func createTestClusters() (clusterAccessor, *dbmocks.ArgoDB, v1alpha1.Cluster, v
 	return getClusterAccessor(clusters), &db, cluster1, cluster2, cluster3, cluster4, cluster5
 }
 
+func createDuplicateTestClusters() (clusterAccessor, *dbmocks.ArgoDB, v1alpha1.Cluster, v1alpha1.Cluster, v1alpha1.Cluster, v1alpha1.Cluster, v1alpha1.Cluster) {
+	db := dbmocks.ArgoDB{}
+	cluster1 := createDuplicateCluster("cluster1", "1")
+	cluster2 := createDuplicateCluster("cluster2", "2")
+	cluster3 := createDuplicateCluster("cluster3", "3")
+	cluster4 := createDuplicateCluster("cluster4", "4")
+	cluster5 := createDuplicateCluster("cluster5", "5")
+
+	clusters := []v1alpha1.Cluster{cluster1, cluster2, cluster3, cluster4, cluster5}
+
+	db.On("ListClusters", mock.Anything).Return(&v1alpha1.ClusterList{Items: []v1alpha1.Cluster{
+		cluster1, cluster2, cluster3, cluster4, cluster5,
+	}}, nil)
+	return getClusterAccessor(clusters), &db, cluster1, cluster2, cluster3, cluster4, cluster5
+}
+
 func getClusterAccessor(clusters []v1alpha1.Cluster) clusterAccessor {
 	// Convert the array to a slice of pointers
 	clusterPointers := getClusterPointers(clusters)
@@ -355,6 +399,15 @@ func createCluster(name string, id string) v1alpha1.Cluster {
 		Name:   name,
 		ID:     id,
 		Server: "https://kubernetes.default.svc?" + id,
+	}
+	return cluster
+}
+
+func createDuplicateCluster(name string, id string) v1alpha1.Cluster {
+	cluster := v1alpha1.Cluster{
+		Name:   name,
+		ID:     id,
+		Server: "https://kubernetes.default.svc",
 	}
 	return cluster
 }

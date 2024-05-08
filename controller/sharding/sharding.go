@@ -110,7 +110,7 @@ func LegacyDistributionFunction(replicas int) DistributionFunction {
 		if c.Shard != nil && int(*c.Shard) < replicas {
 			return int(*c.Shard)
 		}
-		id := c.ID
+		id := c.Server
 		log.Debugf("Calculating cluster shard for cluster id: %s", id)
 		if id == "" {
 			return 0
@@ -143,13 +143,13 @@ func RoundRobinDistributionFunction(clusters clusterAccessor, replicas int) Dist
 				return int(*c.Shard)
 			} else {
 				clusterIndexdByClusterIdMap := createClusterIndexByClusterIdMap(clusters)
-				clusterIndex, ok := clusterIndexdByClusterIdMap[c.ID]
+				clusterIndex, ok := clusterIndexdByClusterIdMap[c.Server]
 				if !ok {
-					log.Warnf("Cluster with id=%s not found in cluster map.", c.ID)
+					log.Warnf("Cluster with id=%s not found in cluster map.", c.Server)
 					return -1
 				}
 				shard := int(clusterIndex % replicas)
-				log.Debugf("Cluster with id=%s will be processed by shard %d", c.ID, shard)
+				log.Debugf("Cluster with id=%s will be processed by shard %d", c.Server, shard)
 				return shard
 			}
 		}
@@ -197,9 +197,9 @@ func createClusterIndexByClusterIdMap(getCluster clusterAccessor) map[string]int
 	clusterById := make(map[string]*v1alpha1.Cluster)
 	clusterIndexedByClusterId := make(map[string]int)
 	for i, cluster := range clusters {
-		log.Debugf("Adding cluster with id=%s and name=%s to cluster's map", cluster.ID, cluster.Name)
-		clusterById[cluster.ID] = cluster
-		clusterIndexedByClusterId[cluster.ID] = i
+		log.Debugf("Adding cluster with id=%s and name=%s to cluster's map", cluster.Server, cluster.Name)
+		clusterById[cluster.Server] = cluster
+		clusterIndexedByClusterId[cluster.Server] = i
 	}
 	return clusterIndexedByClusterId
 }
