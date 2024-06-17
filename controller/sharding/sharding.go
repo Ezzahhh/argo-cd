@@ -117,15 +117,15 @@ func LegacyDistributionFunction(replicas int) DistributionFunction {
 		if c.Shard != nil && int(*c.Shard) < replicas {
 			return int(*c.Shard)
 		}
-		id := c.Server
-		log.Debugf("Calculating cluster shard for cluster id: %s", id)
-		if id == "" {
+		server := c.Server
+		log.Debugf("Calculating cluster shard for cluster server URL: %s", server)
+		if server == "" {
 			return 0
 		} else {
 			h := fnv.New32a()
-			_, _ = h.Write([]byte(id))
+			_, _ = h.Write([]byte(server))
 			shard := int32(h.Sum32() % uint32(replicas))
-			log.Debugf("Cluster with id=%s will be processed by shard %d", id, shard)
+			log.Debugf("Cluster with id=%s will be processed by shard %d", server, shard)
 			return int(shard)
 		}
 	}
@@ -149,14 +149,17 @@ func RoundRobinDistributionFunction(clusters clusterAccessor, replicas int) Dist
 			if c.Shard != nil && int(*c.Shard) < replicas {
 				return int(*c.Shard)
 			} else {
-				clusterIndexdByClusterIdMap := createClusterIndexByClusterIdMap(clusters)
-				clusterIndex, ok := clusterIndexdByClusterIdMap[c.Server]
+				// map of server URLs to index from sorted list by ID
+				clusterIndexdByClusterServerMap := createClusterIndexByClusterServerMap(clusters)
+				// get index for cluster's server URL
+				// duplicated cluster server URLs should mean the returns for these should be the same
+				clusterIndex, ok := clusterIndexdByClusterServerMap[c.Server]
 				if !ok {
-					log.Warnf("Cluster with id=%s not found in cluster map.", c.Server)
+					log.Warnf("Cluster with server=%s not found in cluster map.", c.Server)
 					return -1
 				}
 				shard := int(clusterIndex % replicas)
-				log.Debugf("Cluster with id=%s will be processed by shard %d", c.Server, shard)
+				log.Debugf("Cluster with server=%s will be processed by shard %d", c.Server, shard)
 				return shard
 			}
 		}
@@ -184,16 +187,16 @@ func ConsistentHashingWithBoundedLoadsDistributionFunction(clusters clusterAcces
 				// if the cluster is not in the clusters list anymore, we should unassign it from any shard, so we
 				// return the reserved value of -1
 				if !slices.Contains(clusters(), c) {
-					log.Warnf("Cluster with id=%s not found in cluster map.", c.ID)
+					log.Warnf("Cluster with id=%s not found in cluster map.", c.Server)
 					return -1
 				}
 				shardIndexedByCluster := createConsistentHashingWithBoundLoads(replicas, clusters, apps)
-				shard, ok := shardIndexedByCluster[c.ID]
+				shard, ok := shardIndexedByCluster[c.Server]
 				if !ok {
-					log.Warnf("Cluster with id=%s not found in cluster map.", c.ID)
+					log.Warnf("Cluster with server=%s not found in cluster map.", c.Server)
 					return -1
 				}
-				log.Debugf("Cluster with id=%s will be processed by shard %d", c.ID, shard)
+				log.Debugf("Cluster with server=%s will be processed by shard %d", c.Server, shard)
 				return shard
 			}
 		}
@@ -218,11 +221,11 @@ func createConsistentHashingWithBoundLoads(replicas int, getCluster clusterAcces
 	}
 
 	for _, c := range clusters {
-		clusterIndex, err := consistentHashing.GetLeast(c.ID)
+		clusterIndex, err := consistentHashing.GetLeast(c.Server)
 		if err != nil {
-			log.Warnf("Cluster with id=%s not found in cluster map.", c.ID)
+			log.Warnf("Cluster with server=%s not found in cluster map.", c.Server)
 		}
-		shardIndexedByCluster[c.ID], err = strconv.Atoi(clusterIndex)
+		shardIndexedByCluster[c.Server], err = strconv.Atoi(clusterIndex)
 		if err != nil {
 			log.Errorf("Consistent Hashing was supposed to return a shard index but it returned %d", err)
 		}
@@ -284,17 +287,19 @@ func getSortedClustersList(getCluster clusterAccessor) []*v1alpha1.Cluster {
 	return clusters
 }
 
-func createClusterIndexByClusterIdMap(getCluster clusterAccessor) map[string]int {
+func createClusterIndexByClusterServerMap(getCluster clusterAccessor) map[string]int {
 	clusters := getSortedClustersList(getCluster)
 	log.Debugf("ClustersList has %d items", len(clusters))
-	clusterById := make(map[string]*v1alpha1.Cluster)
-	clusterIndexedByClusterId := make(map[string]int)
+	clusterByServer := make(map[string]*v1alpha1.Cluster)
+	clusterIndexedByClusterServer := make(map[string]int)
 	for i, cluster := range clusters {
-		log.Debugf("Adding cluster with id=%s and name=%s to cluster's map", cluster.Server, cluster.Name)
-		clusterById[cluster.Server] = cluster
-		clusterIndexedByClusterId[cluster.Server] = i
+		log.Debugf("Adding cluster with server=%s and name=%s to cluster's map", cluster.Server, cluster.Name)
+		// duplicated cluster server URLs means we will end up with the last cluster from the sorted list
+		clusterByServer[cluster.Server] = cluster
+		// this is ok because we just want to map server URLs to controller index
+		clusterIndexedByClusterServer[cluster.Server] = i
 	}
-	return clusterIndexedByClusterId
+	return clusterIndexedByClusterServer
 }
 
 // GetOrUpdateShardFromConfigMap finds the shard number from the shard mapping configmap. If the shard mapping configmap does not exist,
