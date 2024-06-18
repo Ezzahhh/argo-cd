@@ -221,8 +221,9 @@ func createConsistentHashingWithBoundLoads(replicas int, getCluster clusterAcces
 		appsIndexedByShard[shard] = 0
 	}
 
-	for _, c := range clusters {
-		// TODO: Cannot use c.Server since the hash function cannot distribute a URL very well
+	for _, c := range removeDuplicateClusters(clusters) {
+		// Cannot use c.Server since the hash function cannot distribute a URL very well
+		// So we remove duplicate clusters with the same URL from a sorted list
 		leastShard, err := consistentHashing.GetLeast(c.ID)
 		if err != nil {
 			log.Warnf("Cluster with id=%s and server=%s not found in cluster map.", c.ID, c.Server)
@@ -240,6 +241,21 @@ func createConsistentHashingWithBoundLoads(replicas int, getCluster clusterAcces
 	}
 
 	return shardIndexedByCluster
+}
+
+// Function to remove duplicates based on the Server field
+func removeDuplicateClusters(clusters []*v1alpha1.Cluster) []*v1alpha1.Cluster {
+	uniqueClusters := []*v1alpha1.Cluster{}
+	seenServers := map[string]bool{}
+
+	for _, c := range clusters {
+		if _, exists := seenServers[c.Server]; !exists {
+			uniqueClusters = append(uniqueClusters, c)
+			seenServers[c.Server] = true
+		}
+	}
+
+	return uniqueClusters
 }
 
 func getAppDistribution(getCluster clusterAccessor, getApps appAccessor) map[string]int64 {
