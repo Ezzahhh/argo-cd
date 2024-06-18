@@ -155,11 +155,11 @@ func RoundRobinDistributionFunction(clusters clusterAccessor, replicas int) Dist
 				// duplicated cluster server URLs should mean the returns for these should be the same
 				clusterIndex, ok := clusterIndexdByClusterServerMap[c.Server]
 				if !ok {
-					log.Warnf("Cluster with server=%s not found in cluster map.", c.Server)
+					log.Warnf("Cluster with id=%s and server=%s not found in cluster map.", c.ID, c.Server)
 					return -1
 				}
 				shard := int(clusterIndex % replicas)
-				log.Debugf("Cluster with server=%s will be processed by shard %d", c.Server, shard)
+				log.Debugf("Cluster with id=%s and server=%s will be processed by shard %d", c.ID, c.Server, shard)
 				return shard
 			}
 		}
@@ -186,17 +186,18 @@ func ConsistentHashingWithBoundedLoadsDistributionFunction(clusters clusterAcces
 			} else {
 				// if the cluster is not in the clusters list anymore, we should unassign it from any shard, so we
 				// return the reserved value of -1
-				if !slices.Contains(clusters(), c) {
-					log.Warnf("Cluster with id=%s not found in cluster map.", c.Server)
+				// don't remove if another cluster shares the same physical cluster
+				if !slices.Contains(clusters(), c) && !ServerExists(clusters, c.Server) {
+					log.Warnf("Cluster with id=%s and server=%s not found in cluster map.", c.ID, c.Server)
 					return -1
 				}
 				shardIndexedByCluster := createConsistentHashingWithBoundLoads(replicas, clusters, apps)
-				shard, ok := shardIndexedByCluster[c.Server]
+				shard, ok := shardIndexedByCluster[c.ID]
 				if !ok {
 					log.Warnf("Cluster with server=%s not found in cluster map.", c.Server)
 					return -1
 				}
-				log.Debugf("Cluster with server=%s will be processed by shard %d", c.Server, shard)
+				log.Debugf("Cluster with id=%s and server=%s will be processed by shard %d", c.ID, c.Server, shard)
 				return shard
 			}
 		}
@@ -221,11 +222,12 @@ func createConsistentHashingWithBoundLoads(replicas int, getCluster clusterAcces
 	}
 
 	for _, c := range clusters {
-		clusterIndex, err := consistentHashing.GetLeast(c.Server)
+		// TODO: Cannot use c.Server since the hash function cannot distribute a URL very well
+		leastShard, err := consistentHashing.GetLeast(c.ID)
 		if err != nil {
-			log.Warnf("Cluster with server=%s not found in cluster map.", c.Server)
+			log.Warnf("Cluster with id=%s and server=%s not found in cluster map.", c.ID, c.Server)
 		}
-		shardIndexedByCluster[c.Server], err = strconv.Atoi(clusterIndex)
+		shardIndexedByCluster[c.ID], err = strconv.Atoi(leastShard)
 		if err != nil {
 			log.Errorf("Consistent Hashing was supposed to return a shard index but it returned %d", err)
 		}
@@ -233,8 +235,8 @@ func createConsistentHashingWithBoundLoads(replicas int, getCluster clusterAcces
 		if !ok {
 			numApps = 0
 		}
-		appsIndexedByShard[clusterIndex] += numApps
-		consistentHashing.UpdateLoad(clusterIndex, appsIndexedByShard[clusterIndex])
+		appsIndexedByShard[leastShard] += numApps
+		consistentHashing.UpdateLoad(leastShard, appsIndexedByShard[leastShard])
 	}
 
 	return shardIndexedByCluster
@@ -515,4 +517,16 @@ func GetClusterSharding(kubeClient kubernetes.Interface, settingsMgr *settings.S
 	}
 	db := db.NewDB(settingsMgr.GetNamespace(), settingsMgr, kubeClient)
 	return NewClusterSharding(db, shardNumber, replicasCount, shardingAlgorithm), nil
+}
+
+// Function to check if a server exists in the list of clusters
+// Do this to know if we have duplicated server URLs in our clusters
+func ServerExists(accessor clusterAccessor, server string) bool {
+	clusters := accessor()
+	for _, c := range clusters {
+		if c.Server == server {
+			return true
+		}
+	}
+	return false
 }
